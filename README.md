@@ -15,13 +15,10 @@ Detection details (Object 1, Object 2, etc. with distance and range status) appe
 
 Build and start the container:
 
-```bash
-docker build -t haptix-vision .
-docker run --rm \
-  -p 5500:5500 \
-  -e HOST_IP=<YOUR_MAC_LAN_IP> \
+
   haptix-vision
-```
+=======
+docker build -t mobilecameraaccessing .
 
 Replace `<YOUR_MAC_LAN_IP>` with your Mac's current Wi-Fi/LAN address. Both the phone and Mac must be on the same Wi-Fi network.
 
@@ -29,9 +26,7 @@ Open `https://localhost:5500` on the host, or `https://<YOUR_MAC_LAN_IP>:5500/ca
 
 Runtime settings can be overridden with environment variables, for example:
 
-```bash
-docker run --rm -p 5500:5500 -e DETECTION_RANGE_METERS=3 haptix-vision
-```
+
 
 The mobile camera page is installable as a PWA. A local HTTPS certificate is required for mobile camera access; accept the browser's certificate warning once when using the development server.
 
