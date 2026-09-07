@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08151d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/app-icon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>Haptix Vision</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="/">Haptix <span>Vision</span></a>
+      <div class="header-controls">
+        <span class="connection"><i id="connection-dot"></i><span id="connection-text">Waiting for camera</span></span>
+        <button class="icon-command is-hidden" data-install-app title="Install app" aria-label="Install app">↓</button>
+      </div>
+    </header>
+    <section class="monitor-grid">
+      <section class="viewer" aria-label="Live detected camera frame">
+        <div class="viewer-toolbar"><span class="eyebrow">Live rear camera</span><span id="frame-age" class="muted">No frames received</span></div>
+        <div class="image-stage">
+          <img id="live-frame" alt="Live object detection feed" hidden>
+          <div id="empty-state" class="empty-state"><strong>Awaiting camera frames</strong><span>Open the capture address on the mobile device.</span></div>
+        </div>
+        <div class="legend" aria-label="Detection legend">
+          <span><b class="legend-within"></b>Within {{ range_meters }} m</span>
+          <span><b class="legend-unknown"></b>Range unavailable</span>
+          <span><b class="legend-outside"></b>Beyond range</span>
+        </div>
+      </section>
+      <aside class="telemetry" aria-label="Detection telemetry">
+        <div class="telemetry-heading"><div><span class="eyebrow">Detected objects</span><h1 id="detection-count">0 objects</h1></div><span class="range-chip">{{ range_meters }} m range</span></div>
+        <div id="detection-list" class="detection-list"><p class="list-placeholder">No detection data yet.</p></div>
+        <dl class="stats"><div><dt>Model</dt><dd>{{ model_name }}</dd></div><div><dt>Inference</dt><dd id="inference-ms">--</dd></div><div><dt>Source</dt><dd id="source-size">--</dd></div></dl>
+      </aside>
+    </section>
+    <section class="capture-address" aria-label="Mobile capture address">
+      <div><span class="eyebrow">Mobile capture address</span><a id="camera-url" href="/camera">/camera</a></div>
+      <button id="copy-camera-url" class="command-button">Copy address</button>
+    </section>
+  </main>
+  <script src="/static/pwa.js"></script>
+  <script>
+    const frame = document.getElementById('live-frame');
+    const emptyState = document.getElementById('empty-state');
+    const connectionText = document.getElementById('connection-text');
+    const connectionDot = document.getElementById('connection-dot');
+    const frameAge = document.getElementById('frame-age');
+    const detectionCount = document.getElementById('detection-count');
+    const detectionList = document.getElementById('detection-list');
+    const inferenceMs = document.getElementById('inference-ms');
+    const sourceSize = document.getElementById('source-size');
+    const cameraUrl = document.getElementById('camera-url');
+    const captureUrl = `${window.location.origin}/camera`;
+    cameraUrl.href = captureUrl;
+    cameraUrl.textContent = captureUrl;
+    function escapeHtml(value) { const node = document.createElement('div'); node.textContent = value; return node.innerHTML; }
+    function renderDetections(detections) {
+      detectionCount.textContent = `${detections.length} ${detections.length === 1 ? 'object' : 'objects'}`;
+      if (!detections.length) { detectionList.innerHTML = '<p class="list-placeholder">No objects in the current frame.</p>'; return; }
+      detectionList.innerHTML = detections.map((detection) => {
+        const distance = detection.distance_m === null ? 'Range unavailable' : `${detection.distance_m.toFixed(1)} m`;
+        return `<article class="detection-item detection-${detection.range_state}"><div><strong>${escapeHtml(detection.label)}</strong><span>${Math.round(detection.confidence * 100)}% confidence</span></div><b>${distance}</b></article>`;
+      }).join('');
+    }
+    async function refreshMonitor() {
+      try {
+        const response = await fetch('/latest', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Monitor unavailable');
+        const data = await response.json();
+        const isLive = data.image && data.received_at && (Date.now() / 1000 - data.received_at < 4);
+        connectionText.textContent = isLive ? 'Camera connected' : 'Waiting for camera';
+        connectionDot.classList.toggle('online', Boolean(isLive));
+        if (data.image) { frame.src = data.image; frame.hidden = false; emptyState.hidden = true; }
+        frameAge.textContent = data.received_at ? `${isLive ? 'Live' : 'Last frame'} · ${Math.max(0, Math.round(Date.now() / 1000 - data.received_at))}s ago` : 'No frames received';
+        renderDetections(data.detections || []);
+        inferenceMs.textContent = data.inference_ms === null ? '--' : `${data.inference_ms} ms`;
+        sourceSize.textContent = data.source_size ? `${data.source_size[0]} × ${data.source_size[1]}` : '--';
+      } catch (error) { connectionText.textContent = 'Monitor offline'; connectionDot.classList.remove('online'); }
+      finally { window.setTimeout(refreshMonitor, 350); }
+    }
+    document.getElementById('copy-camera-url').addEventListener('click', async (event) => {
+      try { await navigator.clipboard.writeText(captureUrl); event.currentTarget.textContent = 'Copied'; }
+      catch { event.currentTarget.textContent = 'Copy unavailable'; }
+      window.setTimeout(() => { event.currentTarget.textContent = 'Copy address'; }, 1800);
+    });
+    refreshMonitor();
+  </script>
+</body>
+</html>
