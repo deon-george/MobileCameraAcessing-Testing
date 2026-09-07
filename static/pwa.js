@@ -1,5 +1,24 @@
 let installPrompt;
-const installButtons = document.querySelectorAll('[data-install-app]');
-window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); installPrompt = event; installButtons.forEach((button) => button.classList.remove('is-hidden')); });
-installButtons.forEach((button) => button.addEventListener('click', async () => { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice; installPrompt = undefined; installButtons.forEach((item) => item.classList.add('is-hidden')); }));
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
+const installBtn = document.getElementById('install-btn');
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  if (installBtn) installBtn.classList.remove('is-hidden');
+});
+
+if (installBtn) {
+  installBtn.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const result = await installPrompt.userChoice;
+    if (result.outcome === 'accepted') {
+      installBtn.classList.add('is-hidden');
+    }
+    installPrompt = undefined;
+  });
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
+}
