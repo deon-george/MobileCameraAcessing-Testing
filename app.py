@@ -14,13 +14,11 @@ from ultralytics import YOLO
 app = Flask(__name__)
 
 MODEL_NAME = os.getenv("YOLO_MODEL", "yolo26n.pt")
-DETECTION_RANGE_METERS = float(os.getenv("DETECTION_RANGE_METERS", "3"))
+DETECTION_RANGE_METERS = float(os.getenv("DETECTION_RANGE_METERS", "2"))
 CAMERA_HORIZONTAL_FOV_DEGREES = float(os.getenv("CAMERA_HORIZONTAL_FOV_DEGREES", "65"))
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.35"))
 model = YOLO(MODEL_NAME)
 
-# Approximate real-world widths are used only as a monocular distance estimate.
-# Objects without a useful reference width remain explicitly marked as un-ranged.
 REFERENCE_WIDTHS_METERS = {
     "person": 0.45, "bicycle": 0.60, "car": 1.80, "motorcycle": 0.75,
     "bus": 2.55, "truck": 2.50, "boat": 1.80, "bench": 1.20,
@@ -28,6 +26,12 @@ REFERENCE_WIDTHS_METERS = {
     "tv": 1.00, "laptop": 0.34, "bottle": 0.07, "backpack": 0.32,
     "suitcase": 0.42, "stop sign": 0.75, "potted plant": 0.35,
 }
+
+ANSI_GREEN = "\033[92m"
+ANSI_RED = "\033[91m"
+ANSI_YELLOW = "\033[93m"
+ANSI_BOLD = "\033[1m"
+ANSI_RESET = "\033[0m"
 
 latest_lock = Lock()
 latest_frame = {
@@ -37,7 +41,6 @@ latest_frame = {
 
 
 def estimate_distance(label, box, frame_width):
-    """Estimate distance from known object width and an assumed camera field of view."""
     reference_width = REFERENCE_WIDTHS_METERS.get(label.lower())
     box_width = max(box[2] - box[0], 1)
     if reference_width is None or frame_width <= 0:
@@ -54,16 +57,37 @@ def range_state(distance_m):
     return "outside"
 
 
+def print_terminal_detections(frame_id, detections):
+    count = len(detections)
+    if count == 0:
+        print(f"{ANSI_BOLD}[Frame #{frame_id}]{ANSI_RESET} 0 objects detected")
+        return
+
+    print(f"\n{ANSI_BOLD}[Frame #{frame_id}]{ANSI_RESET} {count} object{'s' if count != 1 else ''} detected:")
+    for i, det in enumerate(detections, 1):
+        dist = f"{det['distance_m']:.1f} m" if det["distance_m"] is not None else "--"
+        state = det["range_state"]
+        if state == "within":
+            color = ANSI_GREEN
+            marker = "WITHIN"
+        elif state == "outside":
+            color = ANSI_RED
+            marker = "OUTSIDE"
+        else:
+            color = ANSI_YELLOW
+            marker = "UNKNOWN"
+        print(f"  Object {i:<3} | {dist:>6} | {color}● {marker}{ANSI_RESET}")
+
+
 def draw_detections(image, detections):
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
     colors = {"within": "#16d6ad", "outside": "#ff745f", "unknown": "#f6c453"}
-    for detection in detections:
+    for i, detection in enumerate(detections, 1):
         x1, y1, x2, y2 = detection["box"]
         color = colors[detection["range_state"]]
         draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
-        distance = f"{detection['distance_m']:.1f} m" if detection["distance_m"] is not None else "range n/a"
-        label = f"{detection['label']} {detection['confidence'] * 100:.0f}% | {distance}"
+        label = f"Object {i}"
         label_box = draw.textbbox((x1, y1), label)
         label_top = max(0, y1 - (label_box[3] - label_box[1]) - 10)
         draw.rectangle((x1, label_top, label_box[2] + 8, y1), fill=color)
@@ -111,16 +135,22 @@ def analyze():
                 "distance_m": distance_m,
                 "range_state": range_state(distance_m),
             })
-        annotated_image = draw_detections(image, detections)
+
         with latest_lock:
             latest_frame["frame_id"] += 1
+            frame_id = latest_frame["frame_id"]
+
+        print_terminal_detections(frame_id, detections)
+
+        annotated_image = draw_detections(image, detections)
+        with latest_lock:
             latest_frame["image"] = encode_frame(annotated_image)
             latest_frame["detections"] = detections
             latest_frame["inference_ms"] = inference_ms
             latest_frame["received_at"] = time()
             latest_frame["source_size"] = [image.width, image.height]
             response = {
-                "frame_id": latest_frame["frame_id"],
+                "frame_id": frame_id,
                 "detections": detections,
                 "inference_ms": inference_ms,
             }
@@ -155,7 +185,6 @@ def service_worker():
 
 
 def get_local_ip():
-    """Get the machine's local network IP address."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.connect(("8.8.8.8", 80))
@@ -167,12 +196,12 @@ def get_local_ip():
 
 
 if __name__ == "__main__":
-    ip = get_local_ip()
+    ip = os.environ.get("HOST_IP") or get_local_ip()
     print("\n" + "=" * 58)
     print("  Haptix Vision - rear camera object detection")
     print("=" * 58)
-    print(f"\n  Laptop monitor: https://{ip}:5000")
-    print(f"  Mobile camera:  https://{ip}:5000/camera")
+    print(f"\n  Laptop monitor: https://{ip}:5500")
+    print(f"  Mobile camera:  https://{ip}:5500/camera")
     print("\n  Use the same Wi-Fi network and accept the local certificate once.")
-    print("  Distance labels are monocular estimates; depth hardware improves accuracy.\n")
-    app.run(host="0.0.0.0", port=5000, debug=False, ssl_context="adhoc")
+    print("  Detection details will appear here in the terminal.\n")
+    app.run(host="0.0.0.0", port=5500, debug=False, ssl_context="adhoc")
